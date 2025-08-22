@@ -1,16 +1,11 @@
-import { InfluxDB, Point } from "@influxdata/influxdb-client";
 import { Hono } from "hono";
 import { validator } from "hono/validator";
 import z from "zod";
+import { createClient } from "redis";
 
-const token = process.env.INFLUXDB_TOKEN;
-const url = "http://localhost:8086";
-
-let org = `docs`;
-let bucket = `home`;
-const client = new InfluxDB({ url, token });
-const writeClient = client.getWriteApi(org, bucket, "ns");
-const queryClient = client.getQueryApi(org);
+const client = createClient();
+client.on("error", (err) => console.log("Redis Client Error", err));
+await client.connect();
 
 const semanticLabels = [
   "CEILING",
@@ -55,19 +50,10 @@ const route = app
       }
       return parsed.data;
     }),
-    (c) => {
+    async (c) => {
       try {
         const body = c.req.valid("json");
-
-        let point = new Point("environment")
-          .tag("label", body.label)
-          .intField("x", body.x)
-          .intField("y", body.y)
-          .intField("z", body.z);
-
-        writeClient.writePoint(point);
-        writeClient.flush();
-
+        await client.set(body.label, JSON.stringify(body));
         return c.json(
           {
             message: "座標が正常に記録されました。",
@@ -86,7 +72,7 @@ const route = app
     }
   )
   .post(
-    "/query",
+    "/get",
     validator("json", (value, c) => {
       const parsed = QuerySchema.safeParse(value);
       if (!parsed.success) {
@@ -97,41 +83,12 @@ const route = app
     async (c) => {
       try {
         const { label } = c.req.valid("json");
-
-        let fluxQuery = `from(bucket: "home")
-        |> range(start: -10m)
-        |> filter(fn: (r) => r._measurement == "environment" and r["label"] == "${label}")
-        |> last()`;
-
-        const rows: Record<string, any>[] = await new Promise(
-          (resolve, reject) => {
-            const result: Record<string, any>[] = [];
-            queryClient.queryRows(fluxQuery, {
-              next: (row, tableMeta) => {
-                result.push(tableMeta.toObject(row));
-              },
-              error: (error) => {
-                reject(error);
-              },
-              complete: () => {
-                resolve(result);
-              },
-            });
-          }
-        );
-
-        if (rows.length === 0) {
-          return c.json({ message: "データが見つかりませんでした。" }, 404);
+        const latest = await client.get(label);
+        if (latest) {
+          return c.json(JSON.parse(latest), 200);
+        } else {
+          return c.json({ message: "データが見つかりませんでした。" }, 400);
         }
-
-        const latest: any = { label, x: null, y: null, z: null };
-        for (const row of rows) {
-          if (row._field === "x") latest.x = row._value;
-          if (row._field === "y") latest.y = row._value;
-          if (row._field === "z") latest.z = row._value;
-        }
-
-        return c.json(latest, 200);
       } catch (e) {
         console.error(e);
         return c.json({ message: "エラーが発生しました。" }, 500);
