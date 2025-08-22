@@ -73,7 +73,7 @@ const route = app
   )
   .post(
     "/get",
-    validator("json", (value, c) => {
+    validator("query", (value, c) => {
       const parsed = QuerySchema.safeParse(value);
       if (!parsed.success) {
         return c.text("Invalid Body!", 400);
@@ -82,7 +82,7 @@ const route = app
     }),
     async (c) => {
       try {
-        const { label } = c.req.valid("json");
+        const { label } = c.req.valid("query");
         const latest = await client.get(label);
         if (latest) {
           return c.json(JSON.parse(latest), 200);
