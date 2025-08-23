@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { validator } from "hono/validator";
 import z from "zod";
 import { createClient } from "redis";
+import { logger } from "hono/logger";
 
 const client = createClient();
 client.on("error", (err) => console.log("Redis Client Error", err));
@@ -38,6 +39,7 @@ const QuerySchema = z.object({
 });
 
 const app = new Hono();
+app.use(logger());
 
 const route = app
   .post(
@@ -46,7 +48,7 @@ const route = app
       const parsed = WriteSchema.safeParse(value);
       if (!parsed.success) {
         console.log(parsed.error);
-        return c.text("Invalid Body!", 400);
+        return c.json({ error: "Invalid Body!" }, 400);
       }
       return parsed.data;
     }),
@@ -71,12 +73,12 @@ const route = app
       }
     }
   )
-  .post(
+  .get(
     "/get",
     validator("query", (value, c) => {
       const parsed = QuerySchema.safeParse(value);
       if (!parsed.success) {
-        return c.text("Invalid Body!", 400);
+        return c.json({ error: "Invalid Body!" }, 400);
       }
       return parsed.data;
     }),
